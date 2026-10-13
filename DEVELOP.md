@@ -437,3 +437,7 @@ wails build -clean
 - **关闭拦截**：确认退出必须走 `App.ForceQuit()`，否则会被 `OnBeforeClose` 反复拦截。
 - **程序图标**：`build/appicon.png` → `build/windows/icon.ico` 是 exe 图标；
   界面左上角 `.rail-logo` 用的是它的副本 `frontend/src/appicon.png`。换图标要**同时替换两处**并重新构建。
+- **换行符必须是 LF**：`gofmt` 会把 CRLF 文件判定为「未格式化」，而 Git for Windows 默认 `core.autocrlf=true`，
+  克隆 / 检出时会把 LF 换成 CRLF —— 结果是 CI 的 `gofmt -l` 门禁把**所有** `.go` 文件都报出来（本地却干净）。
+  仓库根的 `.gitattributes`（`* text=auto eol=lf`）已固定这一点，CI 的检查步骤也先归一化换行符兜底。
+  **如果哪天 `gofmt -l` 突然列出全部文件，先查换行符，不要真的去 `gofmt -w`。**

@@ -69,12 +69,22 @@ jobs:
       - name: Check formatting
         shell: pwsh
         run: |
+          # gofmt 会把 CRLF 文件判定为「未格式化」。Windows runner 的 git 默认
+          # core.autocrlf=true，检出时可能把 LF 换成 CRLF；虽然 .gitattributes 已固定
+          # eol=lf，这里仍先归一化一次换行符，避免门禁再次误报。
+          Get-ChildItem -Recurse -Filter *.go | ForEach-Object {
+            $text = [System.IO.File]::ReadAllText($_.FullName)
+            if ($text.Contains("`r`n")) {
+              [System.IO.File]::WriteAllText($_.FullName, $text.Replace("`r`n", "`n"))
+            }
+          }
           $unformatted = gofmt -l .
           if ($unformatted) {
             Write-Host "::error::以下文件未通过 gofmt，请先执行 gofmt -w ."
             $unformatted | ForEach-Object { Write-Host "  $_" }
             exit 1
           }
+          Write-Host "gofmt 检查通过"
 
       - name: Vet and test
         run: |
