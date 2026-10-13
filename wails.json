@@ -1,0 +1,14 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "MD5Deduper",
+  "outputfilename": "MD5Deduper",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "frontend:dir": "frontend",
+  "author": {
+    "name": "MajoSissi",
+    "email": "45786458+MajoSissi@users.noreply.github.com"
+  }
+}

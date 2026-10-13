@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MD5 查重去重工具 · 界面预览</title>
+  <link rel="stylesheet" href="./frontend/src/md3.css" />
+</head>
+<body>
+  <div id="app"></div>
+
+  <script>
+    /* 运行时错误看板：任何 JS 异常都会在底部弹出红条，截图即可发现 */
+    (function () {
+      const errs = [];
+      window.__errs = errs;
+      function show() {
+        let d = document.getElementById('__errbar');
+        if (!d) {
+          d = document.createElement('div');
+          d.id = '__errbar';
+          d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#b3261e;' +
+            'color:#fff;font:12px/1.5 monospace;padding:6px 10px;white-space:pre-wrap;max-height:32vh;overflow:auto';
+          document.body.appendChild(d);
+        }
+        d.textContent = 'JS 错误 x' + errs.length + ' :: ' + errs.join('  ||  ');
+      }
+      window.addEventListener('error', (e) => { errs.push(e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno); show(); });
+      window.addEventListener('unhandledrejection', (e) => {
+        errs.push('rejection: ' + ((e.reason && (e.reason.message || e.reason)) || 'unknown')); show();
+      });
+    })();
+  </script>
+
+  <script>
+    /* 仅用于浏览器端界面预览的假后端：不参与 exe 打包。
+       用法：在本目录起静态服务后访问
+         dev-preview.html#scan | #check | #lists | #settings
+         dev-preview.html?auto=scan#scan   等自动场景
+         （scan / multiscan / dropscan / check / check-sel / archivedlg / lists / light /
+           groupdlg / trashlog / mergedlg / exportdlg / dlgselect / drop / overlay / select /
+           closeconfirm）
+         另可叠加 ?geo=1 输出布局几何探针 */
+    (function () {
+      const ROOT = 'D:\\归档\\2024 素材库';
+      const DIRS = ['', '\\设计稿', '\\截图', '\\视频', '\\文档\\合同', '\\素材\\图标', '\\备份\\旧版'];
+      const NAMES = ['banner-final.png', 'logo-v3.svg', '首页.psd', '会议记录.docx', '合同扫描件.pdf',
+        'demo.mp4', 'icon-set.zip', 'readme.txt', '数据备份.sql', '产品图-01.jpg', '产品图-02.jpg',
+        '产品图-03.jpg', '报价单.xlsx', '架构图.drawio', '素材包.tar.gz'];
+
+      const md5 = (i) => {
+        let s = '';
+        for (let k = 0; k < 32; k++) s += '0123456789abcdef'[(i * 7 + k * 13 + (k * k) % 5) % 16];
+        return s;
+      };
+
+      const FILES = [];
+      for (let i = 0; i < 168; i++) {
+        FILES.push({
+          path: ROOT + DIRS[i % DIRS.length] + '\\' + NAMES[i % NAMES.length].replace('.', '-' + (i + 1) + '.'),
+          size: 1024 * (37 + ((i * 971) % 52000)),
+          md5: md5(i % 41),
+          mtime: 1730000000 + i * 37,
+        });
+      }
+      const byMd5 = {};
+      FILES.forEach((f) => { (byMd5[f.md5] = byMd5[f.md5] || []).push(f); });
+      const GROUPS = Object.keys(byMd5).filter((k) => byMd5[k].length > 1).map((k) => ({
+        md5: k, size: byMd5[k][0].size, count: byMd5[k].length,
+        waste: byMd5[k][0].size * (byMd5[k].length - 1),
+        paths: byMd5[k].map((f) => ({ path: f.path, mtime: f.mtime })),
+      })).sort((a, b) => b.waste - a.waste);
+      const ROWS = FILES.map((f) => ({
+        path: f.path, md5: f.md5, size: f.size, mtime: f.mtime,
+        count: byMd5[f.md5].length, dup: byMd5[f.md5].length > 1,
+      })).sort((a, b) => a.path.localeCompare(b.path));
+
+      const LISTS = [
+        {
+          id: '20261012-093012-a1b2', name: '素材库全量', note: '2024 年归档主盘，含设计稿与截图',
+          createdAt: '2026-10-12T09:30:12+08:00', updatedAt: '2026-10-12T18:22:40+08:00',
+          count: 168, totalSize: 4812000000, fileName: '20261012-093012-a1b2.json',
+          layers: [{ id: 'L1', name: '素材库全量', note: '首次扫描', addedAt: '2026-10-12T09:30:12+08:00', count: 168, added: 168, merged: 0 }],
+        },
+        {
+          id: '20261011-140533-c3d4', name: '客户交付包', note: '对外交付校验',
+          createdAt: '2026-10-11T14:05:33+08:00', updatedAt: '2026-10-11T14:31:02+08:00',
+          count: 42, totalSize: 880000000, fileName: '20261011-140533-c3d4.json',
+          layers: [{ id: 'L2', name: '客户交付包', note: '', addedAt: '2026-10-11T14:05:33+08:00', count: 42, added: 42, merged: 0 }],
+        },
+        {
+          id: '20261010-201144-e5f6', name: '历史备份合并', note: '三次备份叠加，已去重',
+          createdAt: '2026-10-10T20:11:44+08:00', updatedAt: '2026-10-12T08:02:10+08:00',
+          count: 1264, totalSize: 21400000000, fileName: '20261010-201144-e5f6.json',
+          sources: [],
+          layers: [
+            { id: 'L3', name: '2023 备份', note: '', addedAt: '2026-10-10T20:11:44+08:00', count: 712, added: 712, merged: 0 },
+            { id: 'L4', name: '2024 备份', note: '叠加', addedAt: '2026-10-12T08:02:10+08:00', count: 1264, added: 552, merged: 160 },
+          ],
+        },
+      ];
+
+      const ENTRIES = ROWS.map((r) => ({
+        md5: r.md5, size: r.size, note: '',
+        paths: byMd5[r.md5].map((f) => ({ path: f.path, mtime: f.mtime })),
+        layers: ['L1'],
+      }));
+
+      const CONFIG = {
+        theme: 'dark', concurrency: 0, minSize: 0, exclude: ['*.tmp', 'node_modules'],
+        skipHidden: true, recursive: true, incremental: true, pageSize: 100,
+        lastScanDir: ROOT, lastCheckIn: [],
+      };
+
+      const listeners = {};
+      window.runtime = {
+        EventsOn(n, f) { (listeners[n] = listeners[n] || []).push(f); },
+        EventsEmit(n, d) { (listeners[n] || []).forEach((f) => f(d)); },
+        OnFileDrop(cb, useTarget) { window.__dropCb = cb; },
+        OnFileDropOff() {},
+        WindowMinimise() {},
+        WindowToggleMaximise() {},
+        WindowIsMaximised() { return Promise.resolve(false); },
+        Quit() {}, LogError() {},
+      };
+      const emit = (n, d) => (listeners[n] || []).forEach((f) => f(d));
+      const page = (items, q) => {
+        const off = q.offset || 0, lim = q.limit || 100;
+        return { total: items.length, offset: off, limit: lim, items: items.slice(off, off + lim) };
+      };
+
+      let seq = 0;
+      const runJob = (kind, total, payload, tick) => {
+        const job = 'job-' + kind + '-' + (++seq);
+        let done = 0;
+        const timer = setInterval(() => {
+          done += Math.ceil(total / 12);
+          if (done >= total) {
+            clearInterval(timer);
+            emit('job:progress', { jobId: job, kind, phase: 'done', total, done: total, bytes: 0, elapsedMs: tick * 12 });
+            emit('job:done', { jobId: job, kind, ok: true, [kind]: Object.assign({ jobId: job, ok: true }, payload) });
+            return;
+          }
+          emit('job:progress', { jobId: job, kind, phase: 'hashing', total, done, bytes: Math.round(total * 1e6 * done / total), elapsedMs: tick * done / total * 12 });
+        }, tick);
+        return Promise.resolve({ jobId: job, ok: true });
+      };
+
+      window.go = {
+        main: {
+          App: {
+            GetEnv: () => Promise.resolve({ dataDir: 'C:\\Program Files\\MD5Deduper\\data', exeDir: 'C:\\Program Files\\MD5Deduper', version: '1.0.0', os: 'windows', numCPU: 16 }),
+            GetConfig: () => Promise.resolve(CONFIG),
+            SetConfig: () => Promise.resolve(),
+            OpenDataDir: () => Promise.resolve(),
+            RevealPath: () => Promise.resolve(),
+            ForceQuit: () => Promise.resolve(),
+            PickDirectory: () => Promise.resolve(ROOT),
+            PickFiles: () => Promise.resolve([ROOT + '\\产品图-01.jpg', ROOT + '\\产品图-02.jpg']),
+            PickOpenPath: () => Promise.resolve(''),
+            PickSavePath: () => Promise.resolve(''),
+            InspectPaths: (ps) => Promise.resolve((ps || []).map((p) => ({
+              path: p, dir: !/\.[a-z0-9]{1,6}$/i.test(p), size: 1024 * 512, error: '',
+            }))),
+
+            StartScan: (req) => runJob('scan', ROWS.length, {
+              root: (req && req.root) || ROOT,
+              roots: (req && req.roots && req.roots.length) ? req.roots : [(req && req.root) || ROOT],
+              files: ROWS.length, unique: Object.keys(byMd5).length,
+              groups: GROUPS.length, dupFiles: ROWS.filter((r) => r.dup).length,
+              waste: GROUPS.reduce((a, g) => a + g.waste, 0),
+              totalSize: ROWS.reduce((a, r) => a + r.size, 0),
+              errors: 2, skipped: 0, elapsedMs: 8420,
+              listId: LISTS[0].id, listName: '素材库全量', groupsTop: GROUPS,
+            }, 90),
+            ScanPage: (q) => {
+              let rows = ROWS;
+              if (q.filter === 'dup') rows = ROWS.filter((r) => r.dup);
+              if (q.filter === 'error') rows = ROWS.slice(0, 2).map((r) => Object.assign({}, r, { error: '拒绝访问 (5)' }));
+              if (q.query) rows = rows.filter((r) => (r.path + r.md5).toLowerCase().includes(q.query.toLowerCase()));
+              return Promise.resolve(page(rows, q));
+            },
+            ScanGroups: (q) => Promise.resolve(page(GROUPS, q)),
+
+            StartCheck: () => runJob('check', 64, {
+              total: 64, matched: 27, unique: 37, matchSize: 940000000,
+              errors: 0, elapsedMs: 3110, lists: ['素材库全量'],
+            }, 80),
+            CheckPage: (q) => {
+              const items = FILES.slice(0, 64).map((f, i) => {
+                const hit = byMd5[f.md5] && byMd5[f.md5].length > 1 && i % 7 !== 3;
+                return {
+                  path: 'E:\\待整理\\' + f.path.split('\\').pop(), size: f.size, md5: f.md5,
+                  matched: hit, matchPath: hit ? f.path : '', matchList: hit ? '素材库全量' : '',
+                };
+              });
+              let rows = items;
+              if (q.filter === 'dup') rows = items.filter((x) => x.matched);
+              if (q.filter === 'unique') rows = items.filter((x) => !x.matched);
+              if (q.query) rows = rows.filter((x) => (x.path + x.md5).toLowerCase().includes(q.query.toLowerCase()));
+              return Promise.resolve(page(rows, q));
+            },
+            CheckAllMatched: () => Promise.resolve(FILES.slice(0, 64).filter((f, i) => i % 7 !== 3).map((f) => 'E:\\待整理\\' + f.path.split('\\').pop())),
+            ArchiveCheck: (req) => Promise.resolve((req && req.targetId)
+              ? { ok: true, message: '已叠加到「素材库全量」：新增 27 条，合并 0 条', added: 27, merged: 0, count: 195, listId: LISTS[0].id }
+              : { ok: true, message: '已新建列表「查重结果 10-13 15:04」：27 条', added: 27, count: 27, listId: 'chk-1' }),
+            MoveToTrash: (req) => Promise.resolve({ moved: req.paths.length, failed: 0, freed: 940000000, errors: [], dryRun: false }),
+            CancelJob: () => Promise.resolve({ ok: true, message: '已请求取消' }),
+            LastJob: () => Promise.resolve(''),
+
+            ListMetas: () => Promise.resolve(LISTS),
+            GetListMeta: (id) => Promise.resolve(LISTS.find((l) => l.id === id) || LISTS[0]),
+            ListPage: (q) => {
+              let rows = ENTRIES;
+              if (q.layer) rows = rows.filter((e) => e.layers.indexOf(q.layer) >= 0);
+              if (q.query) rows = rows.filter((e) => (e.md5 + e.paths.map((p) => p.path).join()).toLowerCase().includes(q.query.toLowerCase()));
+              if (q.sort === 'size') rows = rows.slice().sort((a, b) => b.size - a.size);
+              if (q.sort === 'count') rows = rows.slice().sort((a, b) => b.paths.length - a.paths.length);
+              return Promise.resolve(page(rows, q));
+            },
+            RenameList: () => Promise.resolve({ ok: true, message: '已保存' }),
+            DeleteList: () => Promise.resolve({ ok: true, message: '已删除' }),
+            CopyList: (id, name) => Promise.resolve({ ok: true, message: '已另存为「' + name + '」', listId: 'copy-1' }),
+            MergeLists: () => Promise.resolve({ ok: true, message: '新增 552 条，合并 160 条', added: 552, merged: 160 }),
+            ExportList: () => Promise.resolve('C:\\Program Files\\MD5Deduper\\data\\export\\素材库全量.csv'),
+            ImportList: () => Promise.resolve({ ok: true, message: '已导入', listId: 'imp-1' }),
+            TrashLog: () => Promise.resolve([
+              { time: '2026-10-12T18:40:11+08:00', path: 'E:\\待整理\\产品图-02.jpg', md5: md5(3), size: 2400000, source: '素材库全量' },
+              { time: '2026-10-12T18:40:11+08:00', path: 'E:\\待整理\\banner-final-7.png', md5: md5(9), size: 1800000, source: '素材库全量' },
+            ]),
+          },
+        },
+      };
+
+      /* 自动场景驱动 */
+      window.addEventListener('load', function () {
+        const auto = new URLSearchParams(location.search).get('auto');
+        if (!auto) return;
+        const $ = (s) => document.querySelector(s);
+        const later = (fn, ms) => setTimeout(fn, ms || 0);
+        const st = document.createElement('style');
+        st.textContent = '*,*::before,*::after{animation:none !important;transition:none !important}';
+        document.head.appendChild(st);
+        const addScanRoots = (paths) => Pages.scan.onDrop(paths);
+        const pickBase = (after) => {
+          // 用页面上的「选择目录」按钮添加待查目录，再选一个基准列表
+          $('#btnChkPick').click();
+          later(() => {
+            $('#chkLists').click();
+            later(() => {
+              const first = document.querySelector('.menu-item[data-mi]');
+              if (first) first.click();
+              UI.closeMenus();
+              later(after, 80);
+            }, 220);
+          }, 220);
+        };
+        const startJob = (page) => {
+          const a = Pages[page].actions().find((x) => x.id === 'start');
+          if (a) a.onClick();
+        };
+
+        later(() => {
+          if (auto === 'scan') {
+            addScanRoots([ROOT]);
+            later(() => startJob('scan'), 160);
+          } else if (auto === 'multiscan') {
+            addScanRoots([ROOT, ROOT + '\\截图', ROOT + '\\备份\\旧版']);
+            later(() => startJob('scan'), 220);
+          } else if (auto === 'check') {
+            pickBase(() => startJob('check'));
+          } else if (auto === 'check-sel') {
+            pickBase(() => {
+              startJob('check');
+              later(() => {
+                const b = $('#btnSelAll');
+                if (b) b.click();
+                later(() => { const r = UI.$$('tr[data-path]')[0]; if (r) r.click(); }, 80);
+              }, 2600);
+            });
+          } else if (auto === 'lists') {
+            const first = document.querySelector('.list-item');
+            if (first) first.click();
+          } else if (auto === 'mergedlg' || auto === 'exportdlg' || auto === 'dlgselect') {
+            const first = document.querySelector('.list-item');
+            if (first) first.click();
+            later(() => {
+              // 直接调用底部功能区按钮（已无二级菜单）
+              const want = auto === 'exportdlg' ? 'export' : 'merge';
+              const hit = (Pages.lists.actions() || []).find((a) => a.id === want);
+              if (hit) hit.onClick();
+              if (auto === 'dlgselect') {
+                later(() => {
+                  const b = document.querySelector('.dialog .field--select .select-btn');
+                  if (b) b.click();
+                }, 160);
+              }
+            }, 240);
+          } else if (auto === 'drop') {
+            Shell.go('check');
+            later(() => Pages.check.onDrop([ROOT + '\\产品图-01.jpg', ROOT + '\\截图', 'E:\\待整理\\demo.mp4']), 80);
+          } else if (auto === 'dropscan') {
+            addScanRoots([ROOT + '\\素材\\图标', ROOT + '\\截图', 'E:\\归档\\客户A']);
+          } else if (auto === 'overlay') {
+            document.getElementById('dropHint').classList.add('show');
+          } else if (auto === 'select') {
+            const el = document.querySelector('.field--select .select-btn');
+            if (el) el.click();
+          } else if (auto === 'archivedlg') {
+            // 查重完成后打开「存档为列表」对话框
+            pickBase(() => {
+              startJob('check');
+              later(() => {
+                const b = $('#btnArchive');
+                if (b) b.click();
+              }, 2600);
+            });
+          } else if (auto === 'closeconfirm') {
+            // 任务进行中触发原生关闭事件，应弹出退出确认框
+            addScanRoots([ROOT]);
+            later(() => startJob('scan'), 160);
+            later(() => window.runtime.EventsEmit('app:beforeClose'), 900);
+          } else if (auto === 'trashlog') {
+            Shell.go('settings');
+            later(() => Shell.showTrashLog(), 140);
+          } else if (auto === 'groupdlg') {
+            addScanRoots([ROOT]);
+            later(() => startJob('scan'), 160);
+            later(() => { const tr = document.querySelector('tr[data-md5]'); if (tr) tr.click(); }, 2500);
+          } else if (auto === 'light') {
+            document.documentElement.setAttribute('data-theme', 'light');
+          }
+
+          /* ?geo=1 —— 布局几何探针：把关键元素的矩形写进 #__geo，供 dump-dom 检查 */
+          if (new URLSearchParams(location.search).get('geo')) {
+            setTimeout(() => {
+              const r = (el) => {
+                if (!el) return null;
+                const b = el.getBoundingClientRect();
+                return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)];
+              };
+              const geo = {
+                inner: [window.innerWidth, window.innerHeight],
+                docScroll: [document.documentElement.scrollWidth, document.documentElement.scrollHeight],
+                view: r(document.getElementById('view')),
+                actionbar: r(document.getElementById('actionbar')),
+                abActions: r(document.getElementById('actionbarActions')),
+                abStatus: r(document.getElementById('abStatus')),
+                split: r(document.querySelector('.split')),
+                leftCard: r(document.querySelector('.split > .card')),
+                listItems: r(document.getElementById('listItems')),
+                listDetail: r(document.getElementById('listDetail')),
+                name: r(document.getElementById('listName')),
+                note: r(document.getElementById('listNote')),
+                btnSave: r(document.getElementById('btnSaveMeta')),
+                btnReveal: r(document.getElementById('btnRevealFile')),
+                table: r(document.getElementById('listTable')),
+                pager: r(document.getElementById('listPager')),
+                lastCardBottom: (function () {
+                  const d = document.getElementById('listDetail');
+                  if (!d || !d.lastElementChild) return null;
+                  return Math.round(d.lastElementChild.getBoundingClientRect().bottom);
+                })(),
+              };
+              let pre = document.getElementById('__geo');
+              if (!pre) {
+                pre = document.createElement('pre');
+                pre.id = '__geo';
+                pre.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;margin:0;padding:4px;' +
+                  'background:#000;color:#0f0;font:11px/1.35 monospace;white-space:pre;pointer-events:none';
+                document.body.appendChild(pre);
+              }
+              pre.textContent = 'GEO ' + JSON.stringify(geo);
+            }, 1500);
+          }
+        }, 900);
+      });
+
+      /* geo 探针与 auto 场景无关，任何页面 ?geo=1 都可用 */
+      window.addEventListener('load', function () {
+        if (!new URLSearchParams(location.search).get('geo')) return;
+        setTimeout(() => {
+          const el = document.getElementById('__geo');
+          if (el) return; // auto 场景已经写过
+          const r = (n) => {
+            const e = document.getElementById(n);
+            if (!e) return null;
+            const b = e.getBoundingClientRect();
+            return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)];
+          };
+          const geo = {
+            inner: [window.innerWidth, window.innerHeight],
+            docScroll: [document.documentElement.scrollWidth, document.documentElement.scrollHeight],
+            page: (location.hash || '#scan'),
+            winControls: (function () {
+              const e = document.querySelector('.win-controls');
+              if (!e) return null;
+              const b = e.getBoundingClientRect();
+              return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)];
+            })(),
+            actionbar: r('actionbar'),
+            abActions: r('actionbarActions'),
+            abStatus: r('abStatus'),
+            firstBtn: (function () {
+              const b = document.querySelector('#actionbarActions .btn');
+              return b ? [Math.round(b.getBoundingClientRect().x), Math.round(b.getBoundingClientRect().width)] : null;
+            })(),
+          };
+          const pre = document.createElement('pre');
+          pre.id = '__geo';
+          pre.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;margin:0;padding:4px;' +
+            'background:#000;color:#0f0;font:11px/1.35 monospace;white-space:pre;pointer-events:none';
+          pre.textContent = 'GEO ' + JSON.stringify(geo);
+          document.body.appendChild(pre);
+        }, 1200);
+      });
+    })();
+  </script>
+
+  <script src="./frontend/src/icons.js"></script>
+  <script src="./frontend/src/ui.js"></script>
+  <script src="./frontend/src/widgets.js"></script>
+  <script src="./frontend/src/api.js"></script>
+  <script src="./frontend/src/pages/scan.js"></script>
+  <script src="./frontend/src/pages/check.js"></script>
+  <script src="./frontend/src/pages/lists.js"></script>
+  <script src="./frontend/src/pages/settings.js"></script>
+  <script src="./frontend/src/app.js"></script>
+</body>
+</html>

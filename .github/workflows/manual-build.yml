@@ -1,0 +1,152 @@
+name: Manual Build
+
+# 手动触发的构建流程：在 Actions 页面点 "Run workflow"，或本地执行
+#   gh workflow run manual-build.yml -f version=1.0.1
+# 构建产物：单个绿色版 MD5Deduper.exe（可选 NSIS 安装包），
+# 并可直接创建 / 更新对应的 GitHub Release。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（注入 exe 并用于产物命名，例如 1.0.1）'
+        required: true
+        default: '1.0.0'
+        type: string
+      go-version:
+        description: 'Go 版本'
+        required: false
+        default: '1.27.1'
+        type: string
+      wails-version:
+        description: 'Wails CLI 版本'
+        required: false
+        default: 'v2.16.0'
+        type: string
+      make-installer:
+        description: '额外生成 NSIS 安装包'
+        required: false
+        default: false
+        type: boolean
+      create-release:
+        description: '创建/更新 GitHub Release 并上传产物'
+        required: false
+        default: false
+        type: boolean
+
+# 创建 Release 需要写权限；只读仓库可把这里降级为 contents: read
+permissions:
+  contents: write
+
+concurrency:
+  group: manual-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+    env:
+      # 纯 Go 编译，不需要 cgo（也避免了 runner 上装 MinGW 的麻烦）
+      CGO_ENABLED: '0'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+          cache: true
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ inputs.wails-version }}
+
+      - name: Add Go bin to PATH
+        shell: pwsh
+        run: echo "$(go env GOPATH)\bin" >> $env:GITHUB_PATH
+
+      - name: Check formatting
+        shell: pwsh
+        run: |
+          $unformatted = gofmt -l .
+          if ($unformatted) {
+            Write-Host "::error::以下文件未通过 gofmt，请先执行 gofmt -w ."
+            $unformatted | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
+
+      - name: Vet and test
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $wailsArgs = @('build', '-clean', '-trimpath')
+          if ('${{ inputs.make-installer }}' -eq 'true') { $wailsArgs += '-nsis' }
+          $wailsArgs += @('-ldflags', "-s -w -X main.appVersion=${{ inputs.version }}")
+          Write-Host "wails $($wailsArgs -join ' ')"
+          wails @wailsArgs
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          Get-ChildItem build/bin | Format-Table Name, Length
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MD5Deduper-${{ inputs.version }}-windows-x64
+          path: build/bin/MD5Deduper.exe
+          if-no-files-found: error
+
+      - name: Upload installer artifact
+        if: inputs.make-installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: MD5Deduper-${{ inputs.version }}-windows-x64-installer
+          path: build/bin/*installer*.exe
+          if-no-files-found: warn
+
+      - name: Stage release assets
+        if: inputs.create-release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item build/bin/MD5Deduper.exe "dist/MD5Deduper-v${{ inputs.version }}-windows-x64.exe"
+          Get-ChildItem build/bin -Filter '*installer*.exe' -ErrorAction SilentlyContinue |
+            ForEach-Object { Copy-Item $_.FullName "dist/MD5Deduper-v${{ inputs.version }}-windows-x64-installer.exe" }
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Create or update release
+        if: inputs.create-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "v${{ inputs.version }}"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag 已存在，覆盖上传产物"
+            gh release upload $tag dist/* --clobber
+          } else {
+            gh release create $tag dist/* --title $tag --generate-notes
+          }
+
+      - name: Summary
+        shell: pwsh
+        run: |
+          $assets = 'build/bin/MD5Deduper.exe'
+          if ('${{ inputs.make-installer }}' -eq 'true') { $assets += ' + NSIS 安装包' }
+          $release = '未创建'
+          if ('${{ inputs.create-release }}' -eq 'true') { $release = "v${{ inputs.version }} 已创建/更新" }
+          @(
+            '### 构建完成'
+            ''
+            "- 版本：${{ inputs.version }}"
+            "- Go：${{ inputs.go-version }} / Wails：${{ inputs.wails-version }}"
+            "- 产物：$assets"
+            "- Release：$release"
+          ) | Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding utf8
