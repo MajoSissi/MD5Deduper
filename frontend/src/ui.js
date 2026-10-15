@@ -173,6 +173,13 @@
   let menuStack = [];
   let menuScrim = null;
 
+  // 记录最后的指针位置：锚点失效（例如元素已被重绘替换）时用来兜底定位
+  const lastPointer = { x: 0, y: 0 };
+  document.addEventListener('mousemove', (e) => {
+    lastPointer.x = e.clientX;
+    lastPointer.y = e.clientY;
+  }, { passive: true });
+
   function closeMenus() {
     menuStack.forEach((m) => m.remove());
     menuStack = [];
@@ -250,8 +257,24 @@
     menuStack.push(sub);
   }
 
+  // 解析锚点：元素 / 点坐标 {x,y} / 已脱离文档的元素（退化成指针位置）
+  function anchorRect(anchor) {
+    if (anchor && typeof anchor.x === 'number' && typeof anchor.y === 'number' &&
+        typeof anchor.getBoundingClientRect !== 'function') {
+      const x = anchor.x, y = anchor.y;
+      return { left: x, top: y, right: x, bottom: y, width: 0, height: 0 };
+    }
+    if (anchor && typeof anchor.getBoundingClientRect === 'function') {
+      const r = anchor.getBoundingClientRect();
+      // 全 0 说明元素已经不在文档里（父级 innerHTML 被重绘过），此时不能用
+      if (r.width || r.height || r.left || r.top) return r;
+    }
+    const x = lastPointer.x, y = lastPointer.y;
+    return { left: x, top: y, right: x, bottom: y, width: 0, height: 0 };
+  }
+
   function positionMenu(menu, anchor, isSub) {
-    const r = anchor.getBoundingClientRect();
+    const r = anchorRect(anchor);
     const mw = menu.offsetWidth || 220;
     const mh = menu.offsetHeight || 200;
     let left, top;

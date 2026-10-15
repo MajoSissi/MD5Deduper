@@ -35,3 +35,6 @@ go.work.sum
 .workbuddy/
 .workbuddy-ai/
 build/bin/
+
+# 本地验证用的临时截图（README 的图在 docs/ 下，是要提交的）
+screenshots/

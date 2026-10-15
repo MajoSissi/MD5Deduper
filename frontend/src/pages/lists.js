@@ -20,7 +20,7 @@
     // 左栏：搜索框直接顶到最上面，不再有「列表 N 个」标题栏
     return '<div class="split">' +
       '<div class="card card--flush">' +
-        '<div style="padding:10px 12px 8px">' + searchBox('搜索列表', S.filter) + '</div>' +
+        '<div style="padding:8px 10px 6px">' + searchBox('搜索列表', S.filter) + '</div>' +
         '<div id="listItems"></div>' +
       '</div>' +
       '<div id="listDetail"></div>' +
@@ -30,6 +30,14 @@
   function renderListItems() {
     const el = UI.$('#listItems', host);
     if (!el) return;
+    // activeId 指向的列表可能刚被删除（例如删的是另一项、或多选里不含它），
+    // 不清理会残留 active 高亮，详情面板也会停在已失效的内容上
+    if (S.activeId && !State.lists.some((l) => l.id === S.activeId)) {
+      S.activeId = null;
+      S.meta = null;
+    }
+    // innerHTML 重写会把滚动位置弹回顶部，重绘前后手动保住它
+    const keepScroll = el.scrollTop;
     const q = S.filter.toLowerCase();
     const items = State.lists.filter((l) =>
       !q || l.name.toLowerCase().includes(q) || (l.note || '').toLowerCase().includes(q));
@@ -41,7 +49,7 @@
     }
     el.innerHTML = items.map((l, idx) =>
       '<div class="list-item' + (l.id === S.activeId ? ' active' : '') + (S.selection.has(l.id) ? ' selected' : '') + '" data-id="' + esc(l.id) + '" data-idx="' + idx + '">' +
-        ICO('layers', 20) +
+        ICO('layers', 18) +
         '<div class="grow" style="min-width:0">' +
           '<div class="li-title truncate">' + esc(l.name) + '</div>' +
           '<div class="li-sub muted truncate">' + num(l.count) + ' 条 · ' + bytes(l.totalSize) + ' · ' + relTime(l.updatedAt) + '</div>' +
@@ -52,11 +60,24 @@
       it.oncontextmenu = (e) => {
         e.preventDefault();
         const id = it.dataset.id;
-        // 若右键目标不在选区中，则单选它
-        if (!S.selection.has(id)) { clearSelection(); toggleSel(id, true); }
-        UI.showMenu(it, listContextMenu());
+        // 右键目标不在选区中时改为单选它；只重绘一次（clear+toggle 会重绘两遍）
+        // 注意：重绘后 it 已脱离文档，再用它做锚点会测得全 0 矩形
+        if (!S.selection.has(id)) {
+          S.selection.clear();
+          S.selection.add(id);
+          S.lastSelIndex = Number(it.dataset.idx);
+          renderListItems();
+          Shell.refreshActions();
+        }
+        // 锚点用指针坐标，菜单稳定出现在光标处
+        // 键盘菜单键触发时 clientX/clientY 可能为 0，此时退回元素（UI 内部再兜底到指针位置）
+        // 锚点用指针坐标，菜单稳定出现在光标处
+        // 键盘菜单键触发时 clientX/clientY 可能为 0，此时退回元素（UI 内部再兜底到指针位置）
+        const pt = (e.clientX || e.clientY) ? { x: e.clientX, y: e.clientY } : null;
+        UI.showMenu(pt || it, listContextMenu());
       };
     });
+    if (keepScroll) el.scrollTop = keepScroll;
     Shell.refreshActions();
   }
 
@@ -196,16 +217,18 @@
           '</div>').join('') + '</div>',
       actions: [{ label: '关闭', variant: 'text' }],
     });
-    UI.$$('[data-reveal]').forEach((b) => { b.onclick = () => API.reveal(b.dataset.reveal); });
+    UI.$$('[data-reveal]').forEach((b) => {
+      b.onclick = () => API.reveal(b.dataset.reveal).catch(() => toast('定位失败：文件不存在或不可访问', { type: 'error' }));
+    });
     UI.$$('[data-copy2]').forEach((b) => { b.onclick = () => UI.copyText(b.dataset.copy2); });
   }
 
   /* ---------------------------------------------- 操作 */
 
-  function select(id) {
+  function select(id, keepSel) {
     if (!host) { S.activeId = id; return; }
     S.activeId = id; S.page = 0; S.query = ''; S.layer = '';
-    clearSelection();
+    if (!keepSel) clearSelection();
     renderListItems();
     Shell.refreshActions();
     API.listMeta(id).then((m) => { S.meta = m; renderDetail(); })
@@ -252,15 +275,15 @@
       Shell.refreshActions();
       return;
     }
-    // 普通单击：若当前已选中且是唯一选中项，则不做任何事（保持选中）
+    // 普通单击：清空其他选择，仅选中当前项并打开详情
     if (S.selection.has(id) && S.selection.size === 1) {
       S.lastSelIndex = idx;
       return;
     }
-    clearSelection();
-    toggleSel(id, true);
+    S.selection.clear();
+    S.selection.add(id);
     S.lastSelIndex = idx;
-    select(id);
+    select(id, true);
   }
 
   function mergeSelected() {
@@ -326,11 +349,24 @@
       });
       chain.then(() => {
         toast('已删除 ' + num(sel.length) + ' 个列表');
-        if (sel.indexOf(S.activeId) >= 0) { S.activeId = null; S.meta = null; renderDetail(); }
+        // 删掉的不是当前项时 activeId 仍在，但 S.meta 可能还没加载完（甚至没加载过），
+        // 统一在删除完成后刷一次详情面板：没 meta 就补一次 listMeta
         clearSelection();
         return Shell.reloadLists();
-      }).then(renderListItems).catch(() => {});
+      }).then(() => {
+        renderListItems();
+        return refreshDetail();
+      }).catch(() => {});
     });
+  }
+
+  // 刷新右侧详情面板；当前项存在但 meta 缺失时补加载（删除 / 改名 / 切页都可能出现）
+  function refreshDetail() {
+    if (!S.activeId) { renderDetail(); return Promise.resolve(); }
+    if (S.meta) { renderDetail(); return Promise.resolve(); }
+    return API.listMeta(S.activeId)
+      .then((m) => { S.meta = m; renderDetail(); })
+      .catch(() => { S.meta = null; renderDetail(); });
   }
 
   function saveMeta() {
@@ -416,9 +452,12 @@
       if (!ok) return;
       API.deleteList(id).then(() => {
         toast('已删除');
-        if (S.activeId === id) { S.activeId = null; S.meta = null; renderDetail(); }
+        if (S.activeId === id) { S.activeId = null; S.meta = null; }
         return Shell.reloadLists();
-      }).then(renderListItems).catch(() => {});
+      }).then(() => {
+        renderListItems();
+        return refreshDetail();
+      }).catch(() => {});
     });
   }
 
@@ -440,7 +479,8 @@
     host.innerHTML = shellHtml();
     bindSearch(host, (v) => { S.filter = v; renderListItems(); });
     renderListItems();
-    if (S.activeId) { renderListItems(); renderDetail(); }
+    // 回页面时 activeId 可能还在但 meta 已被清掉（例如删除流程中途切走），补加载一次
+    if (S.activeId && !S.meta) refreshDetail();
     else renderDetail();
   }
 

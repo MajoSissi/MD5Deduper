@@ -6,15 +6,9 @@
   const { statGrid, pagerHtml, bindPager, pathCell, searchBox, bindSearch, selectHtml, bindSelects, setSelectOptions } = W;
 
   // roots 元素：{ path, dir }，dir=false 表示单个文件
-  function nowNote() {
-    const d = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
-      pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
-  }
-
+  // 备注留空即可，后端会在扫描结束时自动填入完成时间
   const S = {
-    roots: [], saveAs: '', note: nowNote(), baseListId: '',
+    roots: [], saveAs: '', note: '', baseListId: '',
     running: false, job: null, result: null, prog: null,
     tab: 'all', query: '', page: 0, sort: 'path', desc: false, page0Filter: 'all',
   };
@@ -29,11 +23,9 @@
       '<div class="card">' +
         '<div class="row gap-8">' + ICO('folder', 18) +
           '<span class="section-label">扫描目标</span>' +
-          '<span class="spacer"></span>' +
-          '<span class="t-body-sm muted">' + ICO('drop', 14) + ' 拖入文件夹或文件即可加入，可一次扫描多个</span>' +
         '</div>' +
-        '<div class="row row--wrap gap-6 mt-8" id="scanRoots" style="min-height:34px"></div>' +
-        '<div class="row gap-8 mt-12">' +
+        // 输入框固定在标题下方，已添加的目标排在输入框下面（为空时整行隐藏，不留空洞）
+        '<div class="row gap-8 mt-8">' +
           '<div class="field grow">' +
             '<input id="scanAdd" placeholder=" " value="" style="padding-right:66px">' +
             '<label>添加目录或文件（回车确认）</label>' +
@@ -45,9 +37,10 @@
           '<button class="btn btn--text" id="btnScanClearRoots" style="flex:0 0 auto" title="清空已添加的目录与文件">' +
             ICO('close', 16) + '清空</button>' +
         '</div>' +
+        '<div class="row row--wrap gap-6 mt-8 hidden" id="scanRoots"></div>' +
         '<div class="row row--wrap gap-16 mt-16">' +
           '<div class="field" style="width:230px"><input id="scanName" placeholder=" " value="' + esc(S.saveAs) + '"><label>列表名</label></div>' +
-          '<div class="field grow" style="min-width:200px"><input id="scanNote" placeholder=" " value="' + esc(S.note) + '" title="留空则自动填入当前日期时间"><label>备注</label></div>' +
+          '<div class="field grow" style="min-width:200px"><input id="scanNote" placeholder=" " value="' + esc(S.note) + '"><label>备注（留空则自动使用扫描完成时间）</label></div>' +
           selectHtml({ id: 'scanBase', label: '叠加到', value: S.baseListId, width: '230px', options: [['', '不叠加']] }) +
         '</div>' +
       '</div>' +
@@ -83,10 +76,12 @@
     const clr = UI.$('#btnScanClearRoots', host);
     if (clr) clr.disabled = !S.roots.length;
     if (!S.roots.length) {
-      el.innerHTML = '<span class="t-body-sm muted">未添加 — 拖入文件夹或文件，或用下方输入框 / 按钮添加</span>';
+      el.innerHTML = '';
+      el.classList.add('hidden');
       Shell.refreshActions();
       return;
     }
+    el.classList.remove('hidden');
     el.innerHTML = S.roots.map((r, i) =>
       '<span class="chip chip--input">' + ICO(r.dir ? 'folder' : 'file', 16) +
       '<span class="truncate" style="max-width:320px" title="' + esc(r.path) + '">' + esc(r.path) + '</span>' +
@@ -333,7 +328,9 @@
       onClose: () => {},
     });
     // 绑定（对话框已插入 DOM）
-    UI.$$('[data-reveal]').forEach((b) => { b.onclick = () => API.reveal(b.dataset.reveal); });
+    UI.$$('[data-reveal]').forEach((b) => {
+      b.onclick = () => API.reveal(b.dataset.reveal).catch(() => toast('定位失败：文件不存在或不可访问', { type: 'error' }));
+    });
     UI.$$('[data-copy]').forEach((b) => { b.onclick = () => UI.copyText(b.dataset.copy); });
   }
 
@@ -353,10 +350,6 @@
     };
     UI.$('#scanName', host).oninput = (e) => { S.saveAs = e.target.value; };
     UI.$('#scanNote', host).oninput = (e) => { S.note = e.target.value; };
-    // 若备注框为空，自动回填当前时间
-    UI.$('#scanNote', host).onblur = (e) => {
-      if (!e.target.value.trim()) { S.note = nowNote(); e.target.value = S.note; }
-    };
     bindSelects(host, (id, v) => {
       if (id === 'scanBase') S.baseListId = v;
     });
@@ -432,7 +425,7 @@
     S.roots = [];
     S.result = null; S.job = null;
     S.query = ''; S.page = 0; S.tab = 'all'; S.page0Filter = 'all';
-    S.saveAs = ''; S.note = nowNote(); S.baseListId = '';
+    S.saveAs = ''; S.note = ''; S.baseListId = '';
     const box = UI.$('#scanResult', host);
     if (box) box.innerHTML = '';
     UI.$('#scanAdd', host).value = '';
@@ -505,7 +498,8 @@
         {
           id: 'reset', label: '重置', icon: 'refresh', variant: 'text',
           title: '清空扫描目标、结果与存档设置',
-          disabled: S.running || (!S.roots.length && !S.result), onClick: resetAll,
+          disabled: S.running || (!S.roots.length && !S.result && !S.saveAs && !S.note && !S.baseListId),
+          onClick: resetAll,
         },
         { id: 'clear', label: '清空结果', icon: 'filter', variant: 'text', disabled: !S.result, onClick: clearResult },
       ];
@@ -524,7 +518,7 @@
           ' · 可释放 ' + bytes(r.waste) + (n > 1 ? ' · ' + n + ' 个目标' : '') + '</span>';
       }
       if (!S.roots.length) {
-        return ICO('folder', 14) + '<span class="ab-text">请添加扫描目标（可拖入多个文件夹或文件，结果合并为一份）</span>';
+        return ICO('folder', 14) + '<span class="ab-text">请添加要扫描的目录或文件</span>';
       }
       const nf = S.roots.filter((x) => !x.dir).length;
       return ICO('folder', 14) + '<span class="ab-text">已添加 ' + num(S.roots.length) + ' 个扫描目标' +

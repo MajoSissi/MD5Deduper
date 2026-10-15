@@ -5,6 +5,7 @@ export namespace main {
 	    targetId: string;
 	    saveAs: string;
 	    note: string;
+	    scope: string;
 	    onlyMatched: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -17,6 +18,7 @@ export namespace main {
 	        this.targetId = source["targetId"];
 	        this.saveAs = source["saveAs"];
 	        this.note = source["note"];
+	        this.scope = source["scope"];
 	        this.onlyMatched = source["onlyMatched"];
 	    }
 	}

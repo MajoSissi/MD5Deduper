@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, path, content string) {
@@ -280,5 +281,111 @@ func TestBuildIndexSizeGuard(t *testing.T) {
 	idx := buildIndex([]*MD5List{l})
 	if m, ok := idx["x"]; !ok || m.Size != 5 {
 		t.Fatal("索引构建失败")
+	}
+}
+
+// 扫描存档时：备注留空 → 自动填扫描完成时间；显式备注 → 原样保留
+func TestArchiveScanAutoNote(t *testing.T) {
+	dir := t.TempDir()
+	root := t.TempDir()
+	write(t, filepath.Join(root, "a.txt"), "hello")
+	write(t, filepath.Join(root, "b.txt"), "hello")
+
+	dataDir := filepath.Join(dir, "data")
+	listsDir := filepath.Join(dataDir, "lists")
+	if err := os.MkdirAll(listsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	app.store = &Store{exeDir: dir, dataDir: dataDir, listsDir: listsDir}
+	app.cfg = defaultConfig()
+
+	_, sess, err := runScan(context.Background(), ScanRequest{Root: root}, app.cfg, func(JobProgress) {}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id, _, err := app.archiveScan(ScanRequest{Root: root}, sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := app.store.LoadList(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Note == "" {
+		t.Fatal("备注留空时未自动填充")
+	}
+	if _, perr := time.ParseInLocation("2006-01-02 15:04:05", l.Note, time.Local); perr != nil {
+		t.Fatalf("自动备注不是时间格式: %q", l.Note)
+	}
+	if len(l.Layers) == 0 || l.Layers[0].Note != l.Note {
+		t.Fatalf("层备注未与列表备注一致: %+v", l.Layers)
+	}
+
+	id2, _, err := app.archiveScan(ScanRequest{Root: root, SaveAs: "自定义", Note: "我的备注"}, sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l2, err := app.store.LoadList(id2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l2.Note != "我的备注" {
+		t.Fatalf("显式备注被覆盖: %q", l2.Note)
+	}
+}
+
+// 查重存档：scope 支持 未命中(unique) / 仅重复(matched) / 全部(all)，缺省为未命中
+func TestArchiveCheckScope(t *testing.T) {
+	items := []CheckItem{
+		{Path: `C:\t\dup1.txt`, MD5: "m1", Size: 10, Matched: true},
+		{Path: `C:\t\dup2.txt`, MD5: "m1", Size: 10, Matched: true},
+		{Path: `C:\t\new1.txt`, MD5: "m2", Size: 20},
+		{Path: `C:\t\new2.txt`, MD5: "m3", Size: 30},
+		{Path: `C:\t\bad.txt`, MD5: "", Size: 0, Error: "读取失败"},
+	}
+
+	cases := []struct {
+		scope string
+		want  int
+	}{
+		{"unique", 2},  // m2 / m3
+		{"matched", 1}, // m1（两条合并成一条）
+		{"all", 3},     // m1 / m2 / m3
+	}
+	for _, c := range cases {
+		got := entriesFromCheck(items, c.scope)
+		if len(got) != c.want {
+			t.Fatalf("scope=%s 条目数 = %d，期望 %d", c.scope, len(got), c.want)
+		}
+	}
+
+	// 缺省范围：新调用（不带 scope / onlyMatched）应默认「未命中」
+	if got := archiveScope(CheckArchiveRequest{}); got != "unique" {
+		t.Fatalf("缺省 scope = %q，期望 unique", got)
+	}
+	// 旧调用兼容：只有 OnlyMatched=true 时按「仅重复」处理
+	if got := archiveScope(CheckArchiveRequest{OnlyMatched: true}); got != "matched" {
+		t.Fatalf("OnlyMatched 兼容失败: %q", got)
+	}
+	// 非法值回落到未命中
+	if got := archiveScope(CheckArchiveRequest{Scope: "???"}); got != "unique" {
+		t.Fatalf("非法 scope 未回落: %q", got)
+	}
+	if got := archiveScope(CheckArchiveRequest{Scope: " ALL "}); got != "all" {
+		t.Fatalf("scope 未去空格/小写: %q", got)
+	}
+}
+
+// 「定位」对不存在的路径要返回错误（前端据此弹提示），而不是静默失败
+// 注意：这里用连父目录都不存在的路径，确保不会真的弹出资源管理器
+func TestRevealMissingPath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-dir", "missing.txt")
+	if err := revealInExplorer(missing); err == nil {
+		t.Fatal("不存在的路径应返回错误")
+	}
+	if err := revealInExplorer(""); err == nil {
+		t.Fatal("空路径应返回错误")
 	}
 }

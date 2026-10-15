@@ -378,8 +378,13 @@ func (a *App) archiveScan(req ScanRequest, sess *scanSession) (string, string, e
 				strconv.Itoa(len(roots)) + " 个目录 " + time.Now().Format("01-02 15:04")
 		}
 	}
+	// 备注留空时，自动使用扫描结束（即存档）时间
+	scanNote := strings.TrimSpace(req.Note)
+	if scanNote == "" {
+		scanNote = time.Now().Format("2006-01-02 15:04:05")
+	}
 	layer := Layer{
-		ID: newID(), Name: name, Note: req.Note, Source: source,
+		ID: newID(), Name: name, Note: scanNote, Source: source,
 		AddedAt: time.Now(), Count: len(entries), Added: len(entries),
 	}
 
@@ -407,7 +412,7 @@ func (a *App) archiveScan(req ScanRequest, sess *scanSession) (string, string, e
 
 	l := &MD5List{
 		ListMeta: ListMeta{
-			ID: newID(), Name: name, Note: req.Note,
+			ID: newID(), Name: name, Note: scanNote,
 			CreatedAt: time.Now(), UpdatedAt: time.Now(),
 			Layers: []Layer{layer},
 		},
@@ -420,16 +425,38 @@ func (a *App) archiveScan(req ScanRequest, sess *scanSession) (string, string, e
 	return l.ID, l.Name, nil
 }
 
+// archiveScope 归一化「存档内容」范围：unique（未命中）/ matched（仅重复）/ all（全部）
+func archiveScope(req CheckArchiveRequest) string {
+	switch strings.ToLower(strings.TrimSpace(req.Scope)) {
+	case "unique", "matched", "all":
+		return strings.ToLower(strings.TrimSpace(req.Scope))
+	}
+	// 旧调用只带 OnlyMatched；都没有时默认「未命中」
+	if req.OnlyMatched {
+		return "matched"
+	}
+	return "unique"
+}
+
 // entriesFromCheck 把查重结果按 MD5 归并成条目
-func entriesFromCheck(items []CheckItem, onlyMatched bool) []Entry {
+func entriesFromCheck(items []CheckItem, scope string) []Entry {
 	idx := make(map[string]int, len(items))
 	out := make([]Entry, 0, len(items))
 	for _, it := range items {
 		if it.MD5 == "" || it.Error != "" {
 			continue
 		}
-		if onlyMatched && !it.Matched {
-			continue
+		switch scope {
+		case "matched":
+			if !it.Matched {
+				continue
+			}
+		case "all":
+			// 全部保留
+		default: // unique
+			if it.Matched {
+				continue
+			}
 		}
 		if i, ok := idx[it.MD5]; ok {
 			out[i].Paths = append(out[i].Paths, PathRef{Path: it.Path})
@@ -455,14 +482,22 @@ func (a *App) ArchiveCheck(req CheckArchiveRequest) OpResult {
 	if sess == nil {
 		return OpResult{OK: false, Message: "查重结果已失效，请重新查重"}
 	}
-	entries := entriesFromCheck(sess.Items, req.OnlyMatched)
+	scope := archiveScope(req)
+	entries := entriesFromCheck(sess.Items, scope)
 	if len(entries) == 0 {
+		switch scope {
+		case "unique":
+			return OpResult{OK: false, Message: "没有未命中的文件可存档"}
+		case "matched":
+			return OpResult{OK: false, Message: "没有命中重复的文件可存档"}
+		}
 		return OpResult{OK: false, Message: "没有可存档的条目"}
 	}
 
 	name := strings.TrimSpace(req.SaveAs)
 	if name == "" {
-		name = "查重结果 " + time.Now().Format("01-02 15:04")
+		suffix := map[string]string{"unique": "未命中", "matched": "仅重复", "all": "全部"}[scope]
+		name = "查重结果·" + suffix + " " + time.Now().Format("01-02 15:04")
 	}
 	layer := Layer{
 		ID: newID(), Name: name, Note: req.Note, Source: "查重",

@@ -172,11 +172,13 @@ type CheckItem struct {
 
 // CheckArchiveRequest 把查重结果存档为 MD5 列表（新建或叠加）
 type CheckArchiveRequest struct {
-	JobID       string `json:"jobId"`
-	TargetID    string `json:"targetId"` // 非空则叠加到该列表，否则新建
-	SaveAs      string `json:"saveAs"`   // 新建 / 层名称
-	Note        string `json:"note"`
-	OnlyMatched bool   `json:"onlyMatched"` // true = 只存档命中重复的文件
+	JobID    string `json:"jobId"`
+	TargetID string `json:"targetId"` // 非空则叠加到该列表，否则新建
+	SaveAs   string `json:"saveAs"`   // 新建 / 层名称
+	Note     string `json:"note"`
+	Scope    string `json:"scope"` // unique | matched | all，空则按 OnlyMatched 推断，再缺省 unique
+	// Deprecated: 旧版「只存命中」开关，保留仅为兼容；新调用请用 Scope
+	OnlyMatched bool `json:"onlyMatched"`
 }
 
 // CheckResult 查重结果

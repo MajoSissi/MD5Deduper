@@ -1,0 +1,25 @@
+# 统一使用 LF 换行符。
+#
+# 为什么必须显式声明：Windows 上 git 默认 core.autocrlf=true，检出时会把 LF 换成 CRLF；
+# 而 gofmt 会把带 CRLF 的文件判定为「未格式化」（gofmt -l 会列出该文件）。
+# 于是 GitHub Actions 的 windows-latest runner（默认 autocrlf=true）上，
+# gofmt 门禁会对所有 .go 文件误报。这里固定 eol=lf 从根上避免。
+* text=auto eol=lf
+
+# 二进制文件不做任何换行符转换
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.icns  binary
+*.exe   binary
+*.dll   binary
+*.so    binary
+*.dylib binary
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.pdf   binary
+*.zip   binary

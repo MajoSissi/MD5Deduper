@@ -48,6 +48,12 @@
   --md-state-press: 0.12;
   --win-hover: rgba(255, 255, 255, 0.09);
 
+  /* 列表项高亮：一律用半透明叠加，避免大块深色压住内容 */
+  --md-active-bg: rgba(190, 198, 220, 0.13);
+  --md-select-bg: rgba(168, 199, 250, 0.18);
+  --md-select-bg-hover: rgba(168, 199, 250, 0.27);
+  --md-select-border: rgba(168, 199, 250, 0.45);
+
   /* ---- 形状 ---- */
   --shape-xs: 4px;
   --shape-sm: 8px;
@@ -111,6 +117,11 @@
 
   --md-shade: rgba(0, 0, 0, 0.05);
   --win-hover: rgba(0, 0, 0, 0.06);
+
+  --md-active-bg: rgba(68, 71, 78, 0.09);
+  --md-select-bg: rgba(11, 87, 208, 0.10);
+  --md-select-bg-hover: rgba(11, 87, 208, 0.16);
+  --md-select-border: rgba(11, 87, 208, 0.38);
 
   --elev-1: 0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
   --elev-2: 0 1px 2px 0 rgba(0, 0, 0, 0.3), 0 2px 6px 2px rgba(0, 0, 0, 0.15);
@@ -938,12 +949,13 @@ table.tbl td.col-num, table.tbl th.col-num { text-align: right; white-space: now
 .view-inner.page-lists { height: 100%; min-height: 0; }
 .page-lists .split {
   flex: 1 1 auto; min-height: 0;
-  grid-template-columns: minmax(230px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(210px, 268px) minmax(0, 1fr);
+  gap: 12px;
   align-items: stretch;
 }
 .page-lists .split > .card:first-child { display: flex; flex-direction: column; min-height: 0; }
-.page-lists #listItems { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 8px 10px; }
-.page-lists #listDetail { display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 0; }
+.page-lists #listItems { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 6px 8px; }
+.page-lists #listDetail { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; }
 .page-lists #listDetail > .card { flex: 0 0 auto; }
 .page-lists #listDetail > .card--fill { flex: 1 1 auto; min-height: 220px; }
 .page-lists #listDetail > .card--fill > .card-head,
@@ -955,28 +967,34 @@ table.tbl td.col-num, table.tbl th.col-num { text-align: right; white-space: now
 }
 
 .list-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 14px;
-  border-radius: var(--shape-md);
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 9px;
+  border-radius: var(--shape-sm);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background .14s ease;
+  transition: background .12s ease, box-shadow .12s ease, border-color .12s ease;
 }
+.list-item + .list-item { margin-top: 2px; }
 .list-item:hover { background: var(--md-shade); }
+/* 当前打开的列表：淡中性叠加 */
 .list-item.active {
-  background: var(--md-secondary-container);
-  color: var(--md-on-secondary-container);
+  background: var(--md-active-bg);
+  color: var(--md-on-surface);
   border-color: transparent;
 }
-.list-item.active .muted { color: var(--md-on-secondary-container); opacity: .8; }
+.list-item.active .muted { color: var(--md-on-surface-variant); opacity: .9; }
+/* 多选高亮：淡主色叠加 + 主色描边 + 左侧强调条 + 标题加重，浅但不失辨识度 */
 .list-item.selected {
-  background: var(--md-primary-container);
-  color: var(--md-on-primary-container);
+  background: var(--md-select-bg);
+  color: var(--md-on-surface);
   border-color: transparent;
+  box-shadow: inset 0 0 0 1px var(--md-select-border), inset 3px 0 0 0 var(--md-primary);
 }
-.list-item.selected .muted { color: var(--md-on-primary-container); opacity: .8; }
-.list-item .li-title { font-weight: 500; font-size: 14px; }
-.list-item .li-sub { font-size: 12px; }
+.list-item.selected:hover { background: var(--md-select-bg-hover); }
+.list-item.selected .muted { color: var(--md-on-surface-variant); opacity: .95; }
+.list-item.selected .li-title { font-weight: 600; }
+.list-item .li-title { font-weight: 500; font-size: 13px; line-height: 1.35; }
+.list-item .li-sub { font-size: 11px; line-height: 1.4; }
 
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 13px; }
 .kv dt { color: var(--md-on-surface-variant); }

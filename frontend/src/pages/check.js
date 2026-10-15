@@ -31,11 +31,9 @@
           '<div style="flex:2 1 440px;min-width:280px">' +
             '<div class="row gap-8">' + ICO('folder', 18) +
               '<span class="section-label">待查对象</span>' +
-              '<span class="spacer"></span>' +
-              '<span class="t-body-sm muted">' + ICO('drop', 14) + ' 拖入文件或文件夹即可加入</span>' +
             '</div>' +
-            '<div class="row row--wrap gap-6 mt-8" id="chkTargets" style="min-height:34px"></div>' +
-            '<div class="row gap-8 mt-12">' +
+            // 与左栏「基准列表」保持同一节奏：标题 → 输入框 → 已添加项（为空时整行隐藏）
+            '<div class="row gap-8 mt-8">' +
               '<div class="field grow">' +
                 '<input id="chkAdd" placeholder=" " value="" style="padding-right:66px">' +
                 '<label>添加目录或文件（回车确认）</label>' +
@@ -47,6 +45,7 @@
               '<button class="btn btn--text" id="btnChkClearTargets" style="flex:0 0 auto" title="清空已添加的目录与文件">' +
                 ICO('close', 16) + '清空</button>' +
             '</div>' +
+            '<div class="row row--wrap gap-6 mt-8 hidden" id="chkTargets"></div>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -139,10 +138,12 @@
     const clr = UI.$('#btnChkClearTargets', host);
     if (clr) clr.disabled = !S.targets.length;
     if (!S.targets.length) {
-      el.innerHTML = '<span class="t-body-sm muted">未添加 — 拖入文件或文件夹，或用下方输入框 / 按钮添加</span>';
+      el.innerHTML = '';
+      el.classList.add('hidden');
       Shell.refreshActions();
       return;
     }
+    el.classList.remove('hidden');
     el.innerHTML = S.targets.map((t, i) =>
       '<span class="chip chip--input">' + ICO(t.dir ? 'folder' : 'file', 16) +
       '<span class="truncate" style="max-width:260px" title="' + esc(t.path) + '">' + esc(t.path) + '</span>' +
@@ -210,18 +211,20 @@
             { label: '耗时', value: duration(r.elapsedMs) },
           ]) +
         '</div>' +
-        '<div class="card-body" style="padding-bottom:0">' +
-          '<div class="row gap-8 row--wrap">' +
-            '<div class="segmented">' +
-              '<button data-f="dup" class="' + (S.filter === 'dup' ? 'selected' : '') + '">仅重复</button>' +
-              '<button data-f="all" class="' + (S.filter === 'all' ? 'selected' : '') + '">全部</button>' +
-              '<button data-f="unique" class="' + (S.filter === 'unique' ? 'selected' : '') + '">未命中</button>' +
-            '</div>' +
-            '<span class="spacer"></span>' + searchBox('搜索路径或 MD5', S.query) +
-          '</div>' +
+        // 与「扫描结果」保持同一套结构：stats → tabs → toolbar(搜索) → 表格 → 分页
+        '<div class="tabs" id="chkTabs">' +
+          '<button data-f="dup" class="' + (S.filter === 'dup' ? 'selected' : '') + '">' +
+            ICO('layers', 18) + '仅重复<span class="tab-count">' + num(r.matched) + '</span></button>' +
+          '<button data-f="unique" class="' + (S.filter === 'unique' ? 'selected' : '') + '">' +
+            ICO('file', 18) + '未命中<span class="tab-count">' + num(r.unique) + '</span></button>' +
+          '<button data-f="all" class="' + (S.filter === 'all' ? 'selected' : '') + '">' +
+            ICO('files', 18) + '全部<span class="tab-count">' + num(r.total) + '</span></button>' +
         '</div>' +
-        '<div id="chkTable" class="table-wrap" style="max-height:50vh"></div>' +
-        '<div class="row gap-8" style="padding:12px 16px;border-top:1px solid var(--md-outline-variant);flex-wrap:wrap">' +
+        '<div class="card-body" style="padding-bottom:0">' +
+          '<div class="row gap-8 row--wrap" id="chkToolbar"></div>' +
+        '</div>' +
+        '<div id="chkTable" class="table-wrap" style="max-height:52vh"></div>' +
+        '<div class="row gap-8 row--wrap" style="padding:12px 16px;border-top:1px solid var(--md-outline-variant)">' +
           '<span class="t-body-sm muted" id="chkSelInfo"></span>' +
           '<span class="spacer"></span>' +
           '<button class="btn btn--text btn--sm" id="btnSelAll">' + ICO('check', 18) + '全选命中</button>' +
@@ -231,16 +234,24 @@
         '<div id="chkPager"></div>' +
       '</div>';
 
-    UI.$$('[data-f]', box).forEach((b) => {
+    UI.$$('#chkTabs button', box).forEach((b) => {
       b.onclick = () => { S.filter = b.dataset.f; S.page = 0; renderResult(); };
     });
-    bindSearch(box, (v) => { S.query = v; S.page = 0; loadTable(); });
+    renderToolbar();
     UI.$('#btnArchive', box).onclick = archiveDialog;
     UI.$('#btnSelAll', box).onclick = selectAllMatched;
     UI.$('#btnSelNone', box).onclick = () => { S.selection.clear(); updateSelInfo(); loadTable(); };
     UI.$('#btnTrash', box).onclick = doTrash;
     loadTable();
     updateSelInfo();
+  }
+
+  // 工具栏只放搜索框，与扫描页一致
+  function renderToolbar() {
+    const tb = UI.$('#chkToolbar', host);
+    if (!tb) return;
+    tb.innerHTML = '<span class="spacer"></span>' + searchBox('搜索路径或 MD5', S.query);
+    bindSearch(tb, (v) => { S.query = v; S.page = 0; loadTable(); });
   }
 
   function loadTable() {
@@ -251,7 +262,9 @@
       query: S.query, filter: S.filter, sort: S.sort, desc: S.desc,
     }).then((pg) => {
       if (!pg.total) {
-        box.innerHTML = UI.emptyState('search', S.filter === 'dup' ? '没有命中重复文件' : '没有匹配的文件');
+        const hint = S.filter === 'dup' ? '没有命中重复文件'
+          : S.filter === 'unique' ? '没有未命中的文件' : '没有匹配的文件';
+        box.innerHTML = UI.emptyState('search', hint);
       } else {
         box.innerHTML =
           '<table class="tbl"><thead><tr>' +
@@ -296,7 +309,12 @@
         toggleSel(tr.dataset.path, cb.checked, tr);
       };
     });
-    UI.$$('[data-reveal]', box).forEach((b) => { b.onclick = (e) => { e.stopPropagation(); API.reveal(b.dataset.reveal); }; });
+    UI.$$('[data-reveal]', box).forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        API.reveal(b.dataset.reveal).catch(() => toast('定位失败：文件不存在或不可访问', { type: 'error' }));
+      };
+    });
     UI.$$('th[data-sort]', box).forEach((th) => {
       th.onclick = () => {
         const k = th.dataset.sort;
@@ -378,7 +396,7 @@
       title: '存档查重结果',
       icon: 'save',
       body: '<p class="t-body-sm muted">本次查重 ' + num(r.total) + ' 个文件，命中 ' + num(r.matched) +
-        ' 个。按 MD5 归并后写入列表，重复 MD5 会自动合并。</p>' +
+        ' 个、未命中 ' + num(r.unique) + ' 个。按 MD5 归并后写入列表，重复 MD5 会自动合并。</p>' +
         '<div class="dialog-fields">' +
         selectHtml({ id: 'arMode', label: '方式', value: 'new', options: [['new', '新建列表'], ['merge', '叠加到已有列表']] }) +
         '<div id="arMergeWrap" class="hidden">' +
@@ -388,7 +406,14 @@
         '</div>' +
         '<div class="field"><input id="arName" placeholder=" " value=""><label>列表名 / 层名称</label></div>' +
         '<div class="field"><input id="arNote" placeholder=" " value=""><label>备注</label></div>' +
-        selectHtml({ id: 'arScope', label: '存档内容', value: 'matched', options: [['matched', '仅命中的重复文件'], ['all', '全部待查文件']] }) +
+        selectHtml({
+          id: 'arScope', label: '存档内容', value: 'unique',
+          options: [
+            ['unique', '未命中（不在基准列表中的 ' + num(r.unique) + ' 个）'],
+            ['matched', '仅重复（命中基准列表的 ' + num(r.matched) + ' 个）'],
+            ['all', '全部（待查的 ' + num(r.total) + ' 个）'],
+          ],
+        }) +
         '</div>',
       onMount: (box) => {
         bindSelects(box, (id, v) => {
@@ -408,7 +433,7 @@
               targetId,
               saveAs: UI.$('#arName', box).value.trim(),
               note: UI.$('#arNote', box).value.trim(),
-              onlyMatched: selValue(box, 'arScope') === 'matched',
+              scope: selValue(box, 'arScope') || 'unique',
             };
             API.archiveCheck(req).then((res) => {
               api.close();
@@ -484,13 +509,15 @@
     return added;
   }
 
-  // 「重置」：清空待查对象与查重结果，回到初始状态
+  // 「重置」：清空基准列表、待查对象与查重结果，回到初始状态
   function resetAll() {
+    S.listIds = [];
     S.targets = [];
     S.result = null; S.job = null; S.selection.clear();
     S.page = 0; S.query = ''; S.filter = 'dup';
     UI.$('#chkResult', host).innerHTML = '';
     UI.$('#chkAdd', host).value = '';
+    renderListsTrigger();
     renderTargets();
     Shell.refreshActions();
   }
@@ -586,8 +613,8 @@
       const a = [
         {
           id: 'reset', label: '重置', icon: 'refresh', variant: 'text',
-          title: '清空待查对象与查重结果',
-          disabled: S.running || (!S.targets.length && !S.result), onClick: resetAll,
+          title: '清空基准列表、待查对象与查重结果',
+          disabled: S.running || (!S.targets.length && !S.result && !S.listIds.length), onClick: resetAll,
         },
         { id: 'clearT', label: '清空待查', icon: 'close', variant: 'text', disabled: !S.targets.length, onClick: clearTargets },
       ];
@@ -605,7 +632,7 @@
           ' · 可释放 ' + bytes(r.matchSize) + '</span>';
       }
       if (!S.targets.length) {
-        return ICO('folder', 14) + '<span class="ab-text">请添加待查对象（可拖入多个文件夹或文件）</span>';
+        return ICO('folder', 14) + '<span class="ab-text">请添加待查的目录或文件</span>';
       }
       const nf = S.targets.filter((x) => !x.dir).length;
       return ICO('layers', 14) + '<span class="ab-text">基准列表 ' + num(S.listIds.length) +

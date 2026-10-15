@@ -197,6 +197,10 @@ data/
 `InspectPaths` 很关键：前端把拖入 / 输入的路径交给它，由后端判断每个路径是**目录还是文件**，
 前端据此显示不同图标并决定扫描语义。
 
+`ArchiveCheck` 的 `CheckArchiveRequest` 用 `scope` 选择存档内容：
+`unique`（未命中，**默认**）/ `matched`（仅重复）/ `all`（全部）；留空时按旧字段 `OnlyMatched` 兼容推断，
+都没有则取 `unique`。层名留空时会自动带上范围，如 `查重结果·未命中 10-15 19:40`。
+
 ---
 
 ## 6. 前端架构
@@ -325,8 +329,11 @@ python -m http.server 8099 --bind 127.0.0.1
 | --- | --- |
 | `scan` `multiscan` `dropscan` `groupdlg` | 扫描页的各种目标状态与结果 |
 | `check` `check-sel` `archivedlg` `drop` | 查重页待查 / 选中 / 存档对话框 |
-| `lists` `mergedlg` `exportdlg` `dlgselect` | 列表页详情与各类对话框 |
+| `lists` `lists-sel` `mergedlg` `exportdlg` `dlgselect` | 列表页详情、`lists-sel` 为 Ctrl 多选高亮态 |
+| `lists-ctx` `lists-ctx2` | 右键菜单定位：`lists-ctx` 右键未选中项，`lists-ctx2` 已多选后右键；均输出 `CTX {pointer,item,menu,…}` 探针，菜单矩形应贴着光标 |
+| `lists-del` | 删除后的状态一致性：焦点在第 2 项、右键删第 1 项；加 `&del=active` 改为删掉焦点项本身。输出 `DEL1/DEL2 {items,active,selected,detail}` 探针（`DEL1` 删除刚完成、`DEL2` 再点一次剩下那项之后） |
 | `settings` `trashlog` `light` `overlay` `select` `closeconfirm` | 设置、回收站日志、浅色、遮罩、下拉、关闭确认 |
+| `none` | 什么都不做，只为在任意页面拿到**完整**几何探针（`?auto=none&geo=1#scan`） |
 
 > `check` 系场景 hash 必须用 `#check`，`lists` 系用 `#lists`，否则页面没 mount 会报 null。
 
@@ -340,8 +347,18 @@ chrome --headless=new --disable-gpu --no-proxy-server \
   "http://127.0.0.1:8099/dev-preview.html?geo=1#lists" | grep -o 'GEO {.*}'
 ```
 
-覆盖 `inner / docScroll / actionbar / abActions / abStatus / split / listItems / listDetail / table / pager / winControls` 等。
-布局类改动（对齐、溢出、贴边）用这个验证比肉眼看截图可靠。
+覆盖 `inner / docScroll / actionbar / abActions / abStatus / split / listItems / listDetail / table / pager / winControls`，
+以及扫描 / 查重页的 `firstCard / scanAdd / scanRoots / chkLists / chkAdd / chkTargets / hidden / cardBottom`。
+布局类改动（对齐、溢出、贴边、空洞）用这个验证比肉眼看截图可靠。
+
+> 不带 `?auto=` 时探针只输出基础字段（`page / winControls / actionbar / firstBtn`）。
+> 要拿完整字段必须带 `?auto=`，用一个不匹配任何场景的值即可（`?auto=none`）。
+
+> **查询参数必须写在 `#hash` 之前**：`?auto=lists&geo=1#lists` 有效，
+> 写成 `?auto=lists#lists&geo=1` 时 `geo` 属于 fragment，`URLSearchParams` 读不到，探针不会输出。
+
+`lists-ctx` / `lists-ctx2` 场景另写一份 `#__ctx` 探针（`CTX {pointer,item,menu,selected,labels}`），
+专测右键菜单定位：菜单矩形应贴着 `pointer`（旧 bug 是重绘后锚点元素失效，菜单被 clamp 到左上角 `[8,6]`）。
 
 ### 8.4 截图
 
@@ -441,3 +458,13 @@ wails build -clean
   克隆 / 检出时会把 LF 换成 CRLF —— 结果是 CI 的 `gofmt -l` 门禁把**所有** `.go` 文件都报出来（本地却干净）。
   仓库根的 `.gitattributes`（`* text=auto eol=lf`）已固定这一点，CI 的检查步骤也先归一化换行符兜底。
   **如果哪天 `gofmt -l` 突然列出全部文件，先查换行符，不要真的去 `gofmt -w`。**
+- **「在资源管理器中定位」不要走命令行**：`exec.Command("explorer", "/select,"+abs)` 在路径含空格 / 中文时，
+  Go 会把整个 `/select,C:\My Docs\a.jpg` 参数用引号包起来，explorer 解析失败后**退而打开「文档」库**
+  （现象就是「定位都跳到文档路径」）。`platform_windows.go` 的 `revealInExplorer` 改用 Shell API
+  `ILCreateFromPathW` + `SHOpenFolderAndSelectItems`（纯 syscall，无需 cgo），命令行的写法只作为兜底。
+  文件不存在时退而打开所在目录；前端调用 `API.reveal` 都要 `.catch` 出提示。
+- **`UI.showMenu` 的锚点不能用会被重绘销毁的元素**：列表 / 表格整表 `innerHTML` 重写后，
+  先前传进去的元素 `getBoundingClientRect()` 全 0，菜单会被 clamp 到左上角 `[8,6]`。
+  右键菜单一律传指针坐标 `{x: e.clientX, y: e.clientY}`；`ui.js` 的 `anchorRect()` 会对失效锚点兜底到 `lastPointer`。
+- **重绘要保住滚动位置**：`#listItems` 这类 `overflow:auto` 容器被 `innerHTML` 重写后 `scrollTop` 会归零，
+  重绘前后要手动保存 / 恢复；一次交互里的多步状态更新合并成**一次**渲染，别连着调两遍。

@@ -17,6 +17,9 @@ import (
 var (
 	modShell32           = windows.NewLazySystemDLL("shell32.dll")
 	procSHFileOperationW = modShell32.NewProc("SHFileOperationW")
+	// 打开「文件所在目录并选中该文件」的 Shell API（不走命令行）
+	procSHOpenFolderAndSelectItems = modShell32.NewProc("SHOpenFolderAndSelectItems")
+	procILCreateFromPathW          = modShell32.NewProc("ILCreateFromPathW")
 )
 
 const (
@@ -139,12 +142,49 @@ func revealInExplorer(path string) error {
 	if err != nil {
 		return err
 	}
-	st, err := os.Stat(abs)
+	if st, err := os.Stat(abs); err == nil {
+		if st.IsDir() {
+			return openFolder(abs)
+		}
+		if err := openAndSelectFile(abs); err == nil {
+			return nil
+		}
+		// Shell API 不可用时退回命令行；无空格的路径这样也能正常工作
+		return exec.Command("explorer", "/select,"+abs).Start()
+	}
+	// 文件已不存在（例如已被移入回收站）：退而打开所在目录，至少让用户看到位置
+	if dir := filepath.Dir(abs); dir != "" && dir != abs {
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			return openFolder(dir)
+		}
+	}
+	return fmt.Errorf("路径不存在：%s", abs)
+}
+
+// openFolder 在资源管理器中打开目录
+func openFolder(dir string) error {
+	return exec.Command("explorer", dir).Start()
+}
+
+// openAndSelectFile 打开文件所在目录并选中该文件。
+//
+// 用 SHOpenFolderAndSelectItems 而不是 exec explorer /select,<path>：
+// 后者在路径含空格 / 中文时，Go 会把整个 "/select,C:\My Docs\a.jpg" 用引号包起来，
+// explorer 解析不出正确的开关与路径，会退而打开「文档」库，看起来就像「定位跳到文档路径」。
+func openAndSelectFile(abs string) error {
+	p16, err := syscall.UTF16PtrFromString(abs)
 	if err != nil {
 		return err
 	}
-	if st.IsDir() {
-		return exec.Command("explorer", abs).Start()
+	pidl, _, _ := procILCreateFromPathW.Call(uintptr(unsafe.Pointer(p16)))
+	if pidl == 0 {
+		return fmt.Errorf("无法解析路径：%s", abs)
 	}
-	return exec.Command("explorer", "/select,"+abs).Start()
+	// 有意不调用 ILFree：调用返回后资源管理器窗口仍在异步初始化，过早释放可能崩。
+	// 每次定位只泄漏一个 ITEMIDLIST（几十字节），可接受。
+	ret, _, _ := procSHOpenFolderAndSelectItems.Call(pidl, 0, 0, 0)
+	if int32(ret) < 0 {
+		return fmt.Errorf("定位失败 (HRESULT 0x%08X)", uint32(ret))
+	}
+	return nil
 }

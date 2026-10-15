@@ -219,7 +219,12 @@
               return Promise.resolve(page(rows, q));
             },
             RenameList: () => Promise.resolve({ ok: true, message: '已保存' }),
-            DeleteList: () => Promise.resolve({ ok: true, message: '已删除' }),
+            DeleteList: (id) => {
+              // 让删除真正反映到 ListMetas 上，便于验证「删除后列表/详情面板状态」
+              const i = LISTS.findIndex((l) => l.id === id);
+              if (i >= 0) LISTS.splice(i, 1);
+              return Promise.resolve({ ok: true, message: '已删除' });
+            },
             CopyList: (id, name) => Promise.resolve({ ok: true, message: '已另存为「' + name + '」', listId: 'copy-1' }),
             MergeLists: () => Promise.resolve({ ok: true, message: '新增 552 条，合并 160 条', added: 552, merged: 160 }),
             ExportList: () => Promise.resolve('C:\\Program Files\\MD5Deduper\\data\\export\\素材库全量.csv'),
@@ -281,6 +286,125 @@
           } else if (auto === 'lists') {
             const first = document.querySelector('.list-item');
             if (first) first.click();
+          } else if (auto === 'lists-sel') {
+            // 多选高亮：先普通点击第 1 项，再 Ctrl 点击第 2、4 项
+            const first = document.querySelector('.list-item');
+            if (first) first.click();
+            later(() => {
+              const items = document.querySelectorAll('.list-item');
+              [1, 3].forEach((i) => {
+                if (items[i]) items[i].dispatchEvent(new MouseEvent('click', { ctrlKey: true, bubbles: true }));
+              });
+            }, 120);
+          } else if (auto === 'lists-ctx') {
+            // 右键一个「未被选中」的列表项：菜单必须出现在光标处，而不是窗口左上角
+            later(() => {
+              const items = document.querySelectorAll('.list-item');
+              const it = items[1] || items[0];
+              if (!it) return;
+              const b = it.getBoundingClientRect();
+              const x = Math.round(b.x + b.width / 2);
+              const y = Math.round(b.y + b.height / 2);
+              it.dispatchEvent(new MouseEvent('contextmenu', {
+                bubbles: true, cancelable: true, clientX: x, clientY: y,
+              }));
+              later(() => {
+                const m = document.querySelector('.menu');
+                const mr = m ? m.getBoundingClientRect() : null;
+                const probe = {
+                  pointer: [x, y],
+                  item: [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)],
+                  menu: mr ? [Math.round(mr.x), Math.round(mr.y), Math.round(mr.width), Math.round(mr.height)] : null,
+                  selected: document.querySelectorAll('.list-item.selected').length,
+                  labels: UI.$$('.menu .menu-text').map((s) => s.textContent),
+                };
+                const pre = document.createElement('pre');
+                pre.id = '__ctx';
+                pre.textContent = 'CTX ' + JSON.stringify(probe);
+                document.body.appendChild(pre);
+              }, 220);
+            }, 220);
+          } else if (auto === 'lists-ctx2') {
+            // 已多选（Ctrl 选中第 2、3 项）后右键其中一项：菜单同样在光标处，且含「叠加选中列表」
+            later(() => {
+              const items = document.querySelectorAll('.list-item');
+              [1, 2].forEach((i) => {
+                if (items[i]) items[i].dispatchEvent(new MouseEvent('click', { ctrlKey: true, bubbles: true }));
+              });
+              later(() => {
+                const it = document.querySelectorAll('.list-item')[2];
+                if (!it) return;
+                const b = it.getBoundingClientRect();
+                const x = Math.round(b.x + b.width / 2);
+                const y = Math.round(b.y + b.height / 2);
+                it.dispatchEvent(new MouseEvent('contextmenu', {
+                  bubbles: true, cancelable: true, clientX: x, clientY: y,
+                }));
+                later(() => {
+                  const m = document.querySelector('.menu');
+                  const mr = m ? m.getBoundingClientRect() : null;
+                  const probe = {
+                    pointer: [x, y],
+                    item: [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)],
+                    menu: mr ? [Math.round(mr.x), Math.round(mr.y), Math.round(mr.width), Math.round(mr.height)] : null,
+                    selected: document.querySelectorAll('.list-item.selected').length,
+                    labels: UI.$$('.menu .menu-text').map((s) => s.textContent),
+                  };
+                  const pre = document.createElement('pre');
+                  pre.id = '__ctx';
+                  pre.textContent = 'CTX ' + JSON.stringify(probe);
+                  document.body.appendChild(pre);
+                }, 220);
+              }, 160);
+            }, 200);
+          } else if (auto === 'lists-del') {
+            // 复现：焦点在第 2 项 → 右键删除第 1 项 → 剩 1 项。
+            // 期望：active 高亮与详情面板一致（要么都清掉、要么都指向剩下那项），且点得动
+            const probe = (tag) => {
+              const d = document.querySelector('#listDetail');
+              const o = {
+                items: document.querySelectorAll('.list-item').length,
+                active: document.querySelectorAll('.list-item.active').length,
+                selected: document.querySelectorAll('.list-item.selected').length,
+                detail: !d ? 'no-host'
+                  : d.querySelector('.empty') ? 'empty'
+                    : d.querySelector('#listName') ? 'detail:' + d.querySelector('#listName').value
+                      : 'other',
+              };
+              const pre = document.createElement('pre');
+              pre.id = '__del' + tag;
+              pre.textContent = 'DEL' + tag + ' ' + JSON.stringify(o);
+              document.body.appendChild(pre);
+            };
+            const items0 = document.querySelectorAll('.list-item');
+            // ?del=active → 删掉「当前焦点项」本身；默认删另一项
+            const delActive = new URLSearchParams(location.search).get('del') === 'active';
+            const focusIdx = delActive ? 0 : 1;
+            const delIdx = delActive ? 0 : 0;
+            if (items0[focusIdx]) items0[focusIdx].click(); // 设定焦点项
+            later(() => {
+              const it = document.querySelectorAll('.list-item')[delIdx];
+              if (!it) return;
+              const b = it.getBoundingClientRect();
+              it.dispatchEvent(new MouseEvent('contextmenu', {
+                bubbles: true, cancelable: true,
+                clientX: Math.round(b.x + b.width / 2), clientY: Math.round(b.y + b.height / 2),
+              }));
+              later(() => {
+                const del = UI.$$('.menu .menu-item').find((m) => m.textContent.indexOf('删除') >= 0);
+                if (del) del.click();
+                later(() => {
+                  const ok = document.querySelector('.dialog .dialog-actions .btn--danger');
+                  if (ok) ok.click();
+                  later(() => {
+                    probe('1'); // 删除刚完成
+                    const rest = document.querySelector('.list-item');
+                    if (rest) rest.click(); // 再点剩下的那项，应当能加载详情
+                    later(() => probe('2'), 400);
+                  }, 600);
+                }, 150);
+              }, 250);
+            }, 500);
           } else if (auto === 'mergedlg' || auto === 'exportdlg' || auto === 'dlgselect') {
             const first = document.querySelector('.list-item');
             if (first) first.click();
@@ -348,6 +472,27 @@
                 abStatus: r(document.getElementById('abStatus')),
                 split: r(document.querySelector('.split')),
                 leftCard: r(document.querySelector('.split > .card')),
+                // 扫描 / 查重页：输入框与目标区（为空时目标区应整行隐藏、不留空洞）
+                firstCard: r(document.querySelector('#view > .view-inner .card')),
+                scanAdd: r(document.getElementById('scanAdd')),
+                scanRoots: r(document.getElementById('scanRoots')),
+                chkLists: r(document.getElementById('chkLists')),
+                chkAdd: r(document.getElementById('chkAdd')),
+                chkTargets: r(document.getElementById('chkTargets')),
+                hidden: (function () {
+                  const ids = ['scanRoots', 'chkTargets'];
+                  const o = {};
+                  ids.forEach((id) => {
+                    const e = document.getElementById(id);
+                    o[id] = e ? e.classList.contains('hidden') : null;
+                  });
+                  return o;
+                })(),
+                cardBottom: (function () {
+                  const v = document.getElementById('view');
+                  if (!v || !v.lastElementChild) return null;
+                  return Math.round(v.lastElementChild.getBoundingClientRect().bottom);
+                })(),
                 listItems: r(document.getElementById('listItems')),
                 listDetail: r(document.getElementById('listDetail')),
                 name: r(document.getElementById('listName')),
